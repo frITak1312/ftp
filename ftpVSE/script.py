@@ -19,7 +19,7 @@ FTP_PASS = os.getenv("FTP_PASS")  # Získejte heslo z proměnné prostředí
 FTP_DIR_INPUT = "/HOME/rakf00/"
 FTP_DIR_OUTPUT = "/HOME/rakf00/exty/"
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Získejte OpenAI API klíč z proměnné prostředí
+OPENAI_API_KEY = os.getenv("OPEN_API_KEY")  # Získejte OpenAI API klíč z proměnné prostředí
 
 FILE_TO_WATCH = "a.txt"
 FILE_TO_CREATE = "data.txt"
@@ -158,3 +158,4 @@ while True:
 
     # --- Pauza ---
     time.sleep(30)
+
