@@ -35,15 +35,14 @@ def get_gpt_response(prompt):
     print("  🤖 Kontaktuji OpenAI API...")
     try:
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": "Odpovídej stručně a k věci."},
                 {"role": "user", "content": f"""
-Pokud odpovědi mají písmena (A-D), použij je.
+Pokud odpovědi mají písmena např. (A-D), použij je.
 Pokud písmena chybí, přiřaď je v pořadí, jak odpovědi přicházejí.
 Výstup vždy ve formátu:
-1:A
-2:B
+číslo otázky: písmeno odpovědi. Např 1:A
 ...
 Zadání:
 {prompt}
@@ -146,3 +145,4 @@ while True:
     # --- Pauza ---
     print("⏳ Čekám 30s...")
     time.sleep(30)
+
