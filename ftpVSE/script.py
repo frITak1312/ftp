@@ -5,13 +5,13 @@ from dotenv import load_dotenv
 import io
 import os
 
-# Načtení proměnných z .env (pokud používáte)
+# Načtení proměnných z .env
 load_dotenv()
 
 # --- 1. Nastavení ---
 FTP_HOST = "webdisk.vse.cz"
 FTP_USER = "AD\\rakf00"
-FTP_PASS = os.getenv("FTP_PASS") # Nebo doplňte heslo natvrdo, pokud nepoužíváte .env
+FTP_PASS = os.getenv("FTP_PASS") 
 
 # 📂 Složky
 FTP_DIR_INPUT = "/HOME/rakf00/"
@@ -25,9 +25,7 @@ FILE_TO_CREATE = "data.txt"
 # --- 2. Připojení k OpenAI ---
 try:
     if not OPENAI_API_KEY:
-        # Pokud nepoužíváte .env, můžete tento řádek smazat a klíč zadat přímo do client = OpenAI(...)
-        print("Upozornění: API klíč nebyl načten z prostředí.")
-        
+        print("⚠️ VAROVÁNÍ: API klíč nebyl načten (zkontroluj .env).")
     client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception as e:
     print(f"❌ Chyba při inicializaci OpenAI: {e}")
@@ -60,7 +58,7 @@ Zadání:
 
 # --- 3. Funkce pro připojení ---
 def get_ftp_connection(directory):
-    """Vytvoří a vrátí FTP spojení do konkrétní složky."""
+    """Vytvoří a vrátí FTP spojení."""
     try:
         ftp = ftplib.FTP_TLS(FTP_HOST, FTP_USER, FTP_PASS, timeout=30)
         ftp.prot_p()
@@ -73,7 +71,7 @@ def get_ftp_connection(directory):
         return None
 
 # --- 4. Hlavní smyčka ---
-print(f"--- Spouštím verzi 'Hard Delete' ---")
+print(f"--- Spouštím OPRAVENÝ skript (Kódování FIX) ---")
 print(f"Sleduji: {FTP_DIR_INPUT}{FILE_TO_WATCH}")
 
 while True:
@@ -92,9 +90,18 @@ while True:
                 mem_file = io.BytesIO()
                 ftp.retrbinary(f'RETR {FILE_TO_WATCH}', mem_file.write)
                 mem_file.seek(0)
-                raw_content = mem_file.getvalue().decode('utf-8')
                 
-                # Kontrola prázdného souboru (pokud je prázdný, jde spát, nic nemaže)
+                # --- OPRAVA KÓDOVÁNÍ (ZDE TO PADALO) ---
+                raw_bytes = mem_file.getvalue()
+                try:
+                    # 1. Pokus o UTF-8
+                    raw_content = raw_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    # 2. Pokud selže, použij Windows-1250 (čeština)
+                    print("  ⚠️ Detekováno starší kódování (Windows-1250), převádím...")
+                    raw_content = raw_bytes.decode('windows-1250', errors='ignore')
+                # ---------------------------------------
+
                 if not raw_content or not raw_content.strip():
                     print(f"  ⚠️ Soubor je PRÁZDNÝ. Přeskakuji.")
                     soubor_nalezen = False
@@ -115,21 +122,18 @@ while True:
         response_text = get_gpt_response(obsah_promptu)
 
         if response_text:
-            # 1. NAHRÁNÍ VÝSLEDKU
+            # 1. NAHRÁNÍ
             print("  🚀 Nahrávám výsledek...")
             try:
                 ftp_out = get_ftp_connection(FTP_DIR_OUTPUT)
                 response_file = io.BytesIO(response_text.encode('utf-8'))
                 ftp_out.storbinary(f'STOR {FILE_TO_CREATE}', response_file)
                 print(f"  💾 Soubor '{FILE_TO_CREATE}' nahrán.")
-                ftp_out.quit() # Uzavřít ihned po nahrání
+                ftp_out.quit()
             except Exception as e:
                 print(f"  ❌ Chyba při nahrávání: {e}")
-                # I když se nahrávání nepovede, kód bude pokračovat k mazání, 
-                # pokud to tak opravdu chcete, ale pravděpodobněji program spadne v bloku výše.
-                # Vzhledem k vašemu požadavku "chyba se nikdy nestane" jdu dál.
 
-            # 2. SMAZÁNÍ VSTUPU (Natvrdo)
+            # 2. SMAZÁNÍ (Natvrdo)
             print("  🗑️ Mažu vstupní soubor...")
             try:
                 ftp_in = get_ftp_connection(FTP_DIR_INPUT)
