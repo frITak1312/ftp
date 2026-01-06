@@ -75,87 +75,73 @@ print(f"Sleduji soubor '{FILE_TO_WATCH}' ve složce: {FTP_DIR_INPUT}")
 print(f"Výstupy se budou ukládat do: {FTP_DIR_OUTPUT}")
 
 while True:
-    ftp = None
-    soubor_nalezen = False
     obsah_promptu = None
+    soubor_nalezen = False # Defaultně false, dokud nepotvrdíme, že má obsah
 
     # --- FÁZE 1: Kontrola a stažení ---
-    try:
-        print("\nKontroluji server (vstupní složku)...")
-        ftp = get_ftp_connection(FTP_DIR_INPUT)
-        print("  Připojeno (fáze 1).")
+    print("\n🔍 Kontroluji server...")
+    ftp = get_ftp_connection(FTP_DIR_INPUT)
 
-        file_list = ftp.nlst()
+    if ftp:
+        try:
+            file_list = ftp.nlst()
+            if FILE_TO_WATCH in file_list:
+                print(f"  📄 Soubor '{FILE_TO_WATCH}' nalezen. Stahuji...")
+                mem_file = io.BytesIO()
+                ftp.retrbinary(f'RETR {FILE_TO_WATCH}', mem_file.write)
+                mem_file.seek(0)
+                raw_content = mem_file.getvalue().decode('utf-8')
 
-        if FILE_TO_WATCH in file_list:
-            print(f"  [NALEZENO] Soubor '{FILE_TO_WATCH}'. Stahuji...")
-            mem_file = io.BytesIO()
-            ftp.retrbinary(f'RETR {FILE_TO_WATCH}', mem_file.write)
-            mem_file.seek(0)
-            obsah_promptu = mem_file.getvalue().decode('utf-8')
-            soubor_nalezen = True
-            print(f"  Staženo {len(obsah_promptu)} znaků.")
-        else:
-            print(f"  Soubor '{FILE_TO_WATCH}' nenalezen. Čekám.")
+                # --- ZDE JE TA ZMĚNA ---
+                if not raw_content or not raw_content.strip():
+                    print(f"  ⚠️ Soubor '{FILE_TO_WATCH}' je PRÁZDNÝ. Přeskakuji a zkusím to za 30s.")
+                    soubor_nalezen = False # Explicitně říkáme, že nemáme co zpracovat
+                else:
+                    obsah_promptu = raw_content
+                    soubor_nalezen = True
+                    print(f"  📥 Staženo {len(obsah_promptu)} znaků. Jdu zpracovat.")
+                # -----------------------
 
-    except (*ftplib.all_errors, socket.timeout) as e:
-        print(f"  [CHYBA FÁZE 1] {e}. Zkouším znovu za 30s.")
-    finally:
-        if ftp:
-            ftp.close()
-            print("  Spojení (fáze 1) uzavřeno.")
+            else:
+                print(f"  💤 Soubor '{FILE_TO_WATCH}' nenalezen.")
+        except Exception as e:
+            print(f"  ❌ Chyba při čtení FTP: {e}")
+        finally:
+            try: ftp.quit()
+            except: pass
 
-    # --- FÁZE 2: OpenAI a Nahrání ---
+    # --- FÁZE 2: Zpracování a nahrání (Pouze pokud NENÍ prázdný) ---
     if soubor_nalezen and obsah_promptu:
         response_text = get_gpt_response(obsah_promptu)
 
         if response_text:
-            ftp_upload = None
-            try:
-                print("  Připojuji se (fáze 2) pro nahrání...")
-                ftp_upload = get_ftp_connection(FTP_DIR_OUTPUT)
+            print("  🚀 Připojuji se pro nahrání výsledku...")
+            ftp_upload = get_ftp_connection(FTP_DIR_OUTPUT)
 
-                response_file = io.BytesIO(response_text.encode('utf-8'))
-
+            if ftp_upload:
                 try:
-                    ftp_upload.delete(FILE_TO_CREATE)
-                except Exception:
-                    pass  # Pokud neexistuje, nevadí
-
-                print(f"  Nahrávám '{FILE_TO_CREATE}' do {FTP_DIR_OUTPUT}...")
-                try:
+                    response_file = io.BytesIO(response_text.encode('utf-8'))
                     ftp_upload.storbinary(f'STOR {FILE_TO_CREATE}', response_file)
-                    print(f"  Soubor '{FILE_TO_CREATE}' úspěšně nahrán.")
-                except socket.timeout:
-                    print(f"  [INFO] 'storbinary' timeout, ale soubor je pravděpodobně nahrán.")
+                    print(f"  💾 Soubor '{FILE_TO_CREATE}' úspěšně nahrán.")
+                    try: ftp_upload.quit()
+                    except: pass
 
-                ftp_upload.close()
-                print("  Spojení (fáze 2) uzavřeno.")
-
-                time.sleep(2)
-                ftp_delete = None
-                try:
-                    print("  Připojuji se (fáze 3) pro mazání vstupního souboru...")
+                    # --- FÁZE 3: Mazání vstupu ---
+                    print("  🗑️ Mazání původního souboru...")
                     ftp_delete = get_ftp_connection(FTP_DIR_INPUT)
-                    ftp_delete.delete(FILE_TO_WATCH)
-                    print(f"  [ÚSPĚCH] Původní soubor '{FILE_TO_WATCH}' smazán.")
-                    print("-" * 20)
-                except (*ftplib.all_errors, socket.timeout) as e:
-                    print(f"  [CHYBA FÁZE 3] Nepodařilo se smazat '{FILE_TO_WATCH}': {e}")
-                finally:
                     if ftp_delete:
-                        ftp_delete.close()
-                        print("  Spojení (fáze 3) uzavřeno.")
+                        ftp_delete.delete(FILE_TO_WATCH)
+                        print(f"  ✅ Soubor '{FILE_TO_WATCH}' smazán.")
+                        try: ftp_delete.quit()
+                        except: pass
 
-            except (*ftplib.all_errors, socket.timeout) as e:
-                print(f"  [CHYBA FÁZE 2] {e}. Soubor 'a.txt' NEBYL smazán.")
-            finally:
-                if ftp_upload and ftp_upload.sock:
-                    ftp_upload.close()
-                    print("  Spojení (fáze 2) nouzově uzavřeno.")
-        else:
-            print("  Chyba OpenAI, 'a.txt' nebude smazán. Zkouším znovu za 30s.")
+                except Exception as e:
+                    print(f"  ❌ Chyba při nahrávání/mazání: {e}")
+                    try: ftp_upload.close()
+                    except: pass
 
     # --- Pauza ---
+    print("⏳ Čekám 30s...")
     time.sleep(30)
+
 
