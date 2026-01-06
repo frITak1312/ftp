@@ -4,40 +4,40 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import io
 import os
-import socket  # Důležité pro zachycení 'timeout'
 
-
+# Načtení proměnných z .env (pokud používáte)
 load_dotenv()
-
 
 # --- 1. Nastavení ---
 FTP_HOST = "webdisk.vse.cz"
 FTP_USER = "AD\\rakf00"
-FTP_PASS = os.getenv("FTP_PASS")  # Získejte heslo z proměnné prostředí
+FTP_PASS = os.getenv("FTP_PASS") # Nebo doplňte heslo natvrdo, pokud nepoužíváte .env
 
-# 📂 Složky pro vstup a výstup
+# 📂 Složky
 FTP_DIR_INPUT = "/HOME/rakf00/"
 FTP_DIR_OUTPUT = "/HOME/rakf00/exty/"
 
-OPENAI_API_KEY = os.getenv("OPEN_API_KEY")  # Získejte OpenAI API klíč z proměnné prostředí
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") 
 
 FILE_TO_WATCH = "a.txt"
 FILE_TO_CREATE = "data.txt"
 
 # --- 2. Připojení k OpenAI ---
 try:
+    if not OPENAI_API_KEY:
+        # Pokud nepoužíváte .env, můžete tento řádek smazat a klíč zadat přímo do client = OpenAI(...)
+        print("Upozornění: API klíč nebyl načten z prostředí.")
+        
     client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception as e:
-    print(f"Chyba při inicializaci OpenAI (zkontrolujte API klíč): {e}")
+    print(f"❌ Chyba při inicializaci OpenAI: {e}")
     exit()
 
-
 def get_gpt_response(prompt):
-    """Pošle text na API OpenAI a vrátí odpověď."""
-    print("  Kontaktuji OpenAI API...")
+    print("  🤖 Kontaktuji OpenAI API...")
     try:
         completion = client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Odpovídej stručně a k věci."},
                 {"role": "user", "content": f"""
@@ -47,41 +47,43 @@ Výstup vždy ve formátu:
 1:A
 2:B
 ...
+Zadání:
 {prompt}
 """}
             ]
         )
-        print("  Odpověď od AI získána.")
+        print("  ✅ Odpověď od AI získána.")
         return completion.choices[0].message.content
     except Exception as e:
-        print(f"  Chyba při volání OpenAI API: {e}")
+        print(f"  ❌ Chyba při volání OpenAI API: {e}")
         return None
-
 
 # --- 3. Funkce pro připojení ---
 def get_ftp_connection(directory):
-    """Vytvoří, nastaví a vrátí nové FTP spojení."""
-    ftp = ftplib.FTP_TLS(FTP_HOST, FTP_USER, FTP_PASS, timeout=30)
-    ftp.prot_p()
-    ftp.set_pasv(True)
-    if directory != "/":
-        ftp.cwd(directory)
-    return ftp
-
+    """Vytvoří a vrátí FTP spojení do konkrétní složky."""
+    try:
+        ftp = ftplib.FTP_TLS(FTP_HOST, FTP_USER, FTP_PASS, timeout=30)
+        ftp.prot_p()
+        ftp.set_pasv(True)
+        if directory != "/":
+            ftp.cwd(directory)
+        return ftp
+    except Exception as e:
+        print(f"  ❌ Chyba připojení k FTP: {e}")
+        return None
 
 # --- 4. Hlavní smyčka ---
-print(f"--- Spouštím finální skript (v. 8) ---")
-print(f"Sleduji soubor '{FILE_TO_WATCH}' ve složce: {FTP_DIR_INPUT}")
-print(f"Výstupy se budou ukládat do: {FTP_DIR_OUTPUT}")
+print(f"--- Spouštím verzi 'Hard Delete' ---")
+print(f"Sleduji: {FTP_DIR_INPUT}{FILE_TO_WATCH}")
 
 while True:
     obsah_promptu = None
-    soubor_nalezen = False # Defaultně false, dokud nepotvrdíme, že má obsah
+    soubor_nalezen = False 
 
     # --- FÁZE 1: Kontrola a stažení ---
     print("\n🔍 Kontroluji server...")
     ftp = get_ftp_connection(FTP_DIR_INPUT)
-
+    
     if ftp:
         try:
             file_list = ftp.nlst()
@@ -91,57 +93,52 @@ while True:
                 ftp.retrbinary(f'RETR {FILE_TO_WATCH}', mem_file.write)
                 mem_file.seek(0)
                 raw_content = mem_file.getvalue().decode('utf-8')
-
-                # --- ZDE JE TA ZMĚNA ---
+                
+                # Kontrola prázdného souboru (pokud je prázdný, jde spát, nic nemaže)
                 if not raw_content or not raw_content.strip():
-                    print(f"  ⚠️ Soubor '{FILE_TO_WATCH}' je PRÁZDNÝ. Přeskakuji a zkusím to za 30s.")
-                    soubor_nalezen = False # Explicitně říkáme, že nemáme co zpracovat
+                    print(f"  ⚠️ Soubor je PRÁZDNÝ. Přeskakuji.")
+                    soubor_nalezen = False
                 else:
                     obsah_promptu = raw_content
                     soubor_nalezen = True
-                    print(f"  📥 Staženo {len(obsah_promptu)} znaků. Jdu zpracovat.")
-                # -----------------------
-
+                    print(f"  📥 Staženo. Jdu zpracovat.")
             else:
-                print(f"  💤 Soubor '{FILE_TO_WATCH}' nenalezen.")
+                print(f"  💤 Soubor nenalezen.")
         except Exception as e:
-            print(f"  ❌ Chyba při čtení FTP: {e}")
+            print(f"  ❌ Chyba FTP (čtení): {e}")
         finally:
-            try: ftp.quit()
+            try: ftp.quit() 
             except: pass
 
-    # --- FÁZE 2: Zpracování a nahrání (Pouze pokud NENÍ prázdný) ---
+    # --- FÁZE 2: Akce (Upload + Delete) ---
     if soubor_nalezen and obsah_promptu:
         response_text = get_gpt_response(obsah_promptu)
 
         if response_text:
-            print("  🚀 Připojuji se pro nahrání výsledku...")
-            ftp_upload = get_ftp_connection(FTP_DIR_OUTPUT)
+            # 1. NAHRÁNÍ VÝSLEDKU
+            print("  🚀 Nahrávám výsledek...")
+            try:
+                ftp_out = get_ftp_connection(FTP_DIR_OUTPUT)
+                response_file = io.BytesIO(response_text.encode('utf-8'))
+                ftp_out.storbinary(f'STOR {FILE_TO_CREATE}', response_file)
+                print(f"  💾 Soubor '{FILE_TO_CREATE}' nahrán.")
+                ftp_out.quit() # Uzavřít ihned po nahrání
+            except Exception as e:
+                print(f"  ❌ Chyba při nahrávání: {e}")
+                # I když se nahrávání nepovede, kód bude pokračovat k mazání, 
+                # pokud to tak opravdu chcete, ale pravděpodobněji program spadne v bloku výše.
+                # Vzhledem k vašemu požadavku "chyba se nikdy nestane" jdu dál.
 
-            if ftp_upload:
-                try:
-                    response_file = io.BytesIO(response_text.encode('utf-8'))
-                    ftp_upload.storbinary(f'STOR {FILE_TO_CREATE}', response_file)
-                    print(f"  💾 Soubor '{FILE_TO_CREATE}' úspěšně nahrán.")
-                    try: ftp_upload.quit()
-                    except: pass
-
-                    # --- FÁZE 3: Mazání vstupu ---
-                    print("  🗑️ Mazání původního souboru...")
-                    ftp_delete = get_ftp_connection(FTP_DIR_INPUT)
-                    if ftp_delete:
-                        ftp_delete.delete(FILE_TO_WATCH)
-                        print(f"  ✅ Soubor '{FILE_TO_WATCH}' smazán.")
-                        try: ftp_delete.quit()
-                        except: pass
-
-                except Exception as e:
-                    print(f"  ❌ Chyba při nahrávání/mazání: {e}")
-                    try: ftp_upload.close()
-                    except: pass
+            # 2. SMAZÁNÍ VSTUPU (Natvrdo)
+            print("  🗑️ Mažu vstupní soubor...")
+            try:
+                ftp_in = get_ftp_connection(FTP_DIR_INPUT)
+                ftp_in.delete(FILE_TO_WATCH)
+                print(f"  ✅ Soubor '{FILE_TO_WATCH}' SMAZÁN.")
+                ftp_in.quit()
+            except Exception as e:
+                print(f"  ❌ Chyba při mazání: {e}")
 
     # --- Pauza ---
     print("⏳ Čekám 30s...")
     time.sleep(30)
-
-
